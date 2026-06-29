@@ -1,96 +1,59 @@
-"""LCEL chain for maintenance issue analysis."""
+"""LCEL chain for structured maintenance issue analysis."""
 
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.exceptions import OutputParserException
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import Runnable, RunnableLambda
+from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
+from pydantic import ValidationError
 
-from .config import AppConfig
+from .config import AppConfig, load_config
+from .schemas import RepairAnalysis
 
 
-OUTPUT_SECTIONS = (
-    "問題摘要",
-    "可能原因",
-    "初步檢查方向",
-    "需要補問的資訊",
-    "建議處理優先順序",
-)
+SYSTEM_PROMPT = """你是一位謹慎、務實的印表機與設備維修助理。
+請使用繁體中文，根據使用者提供的故障描述產生結構化維修分析。
 
-SYSTEM_PROMPT = """你是一位謹慎、務實的維修問題分析助手。
-你的工作是根據使用者描述，整理可能原因與安全的初步檢查方向。
-資訊不足時不可武斷下結論；涉及人身、電氣、燃氣、高溫、高壓或設備損壞風險時，
-應明確提醒停止操作並交由合格人員處理。
+注意：
+- 不要假裝已經知道真正原因，也不要直接宣稱某個原因一定正確。
+- 可能原因請使用「可能」語氣。
+- 檢查方向需具體可執行。
+- 需要補問的資訊需能協助維修人員縮小問題範圍。
+- 建議處理優先順序需從低風險、容易檢查的項目開始。
+- 每個清單欄位至少提供 3 筆內容。
+- 涉及人身、電氣、燃氣、高溫、高壓或設備損壞風險時，
+  應明確提醒停止操作並交由合格人員處理。"""
 
-回覆必須使用繁體中文，並嚴格依照以下五個標題與順序輸出，不可省略、改名或新增標題：
-問題摘要
-可能原因
-初步檢查方向
-需要補問的資訊
-建議處理優先順序
+USER_PROMPT = """只回傳一個符合 RepairAnalysis schema 的 JSON object，
+不可加入 Markdown、程式碼區塊或 schema 以外的欄位。
 
-每個標題下請以精簡條列內容回答。"""
+欄位與型別必須完全如下：
+- "summary": string
+- "possible_causes": 至少 3 筆 string 的 array
+- "check_steps": 至少 3 筆 string 的 array
+- "questions": 至少 3 筆 string 的 array
+- "priority_steps": 至少 3 筆 string 的 array
 
-USER_PROMPT = """請分析以下維修問題，並直接依照下列格式回答：
-
-問題摘要
-- ...
-
-可能原因
-- ...
-
-初步檢查方向
-- ...
-
-需要補問的資訊
-- ...
-
-建議處理優先順序
-- ...
-
-維修問題：
+使用者故障描述：
 
 {problem}"""
 
-FORMAT_FALLBACK = """問題摘要
-- 模型未能產生符合指定格式的分析結果。
 
-可能原因
-- 目前資訊不足，無法可靠判斷。
-
-初步檢查方向
-- 請先確認設備狀態；如有安全風險，立即停止操作。
-
-需要補問的資訊
-- 請補充設備名稱、型號、異常現象、發生時機及已嘗試的處理。
-
-建議處理優先順序
-- 先排除人身與設備安全風險，再補充資訊後重新分析。"""
-
-
-def ensure_output_format(response: str) -> str:
-    """Keep valid model output or return a safe response with all sections."""
-
-    normalized_response = response.strip()
-    section_positions = [
-        normalized_response.find(section) for section in OUTPUT_SECTIONS
-    ]
-    has_all_sections_in_order = (
-        all(position >= 0 for position in section_positions)
-        and section_positions == sorted(section_positions)
-    )
-
-    if has_all_sections_in_order:
-        return normalized_response
-    return FORMAT_FALLBACK
+class RepairAnalysisError(RuntimeError):
+    """Raised when a model response cannot produce a RepairAnalysis."""
 
 
 def create_repair_analysis_chain(config: AppConfig) -> Runnable:
-    """Create the maintenance issue analysis chain."""
+    """Create a chain that returns a validated RepairAnalysis object."""
 
     model = ChatOpenAI(
         model=config.model,
         base_url=config.base_url,
         api_key=config.api_key,
+        temperature=0,
+    )
+    structured_model = model.with_structured_output(
+        RepairAnalysis,
+        method="json_mode",
     )
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -98,9 +61,22 @@ def create_repair_analysis_chain(config: AppConfig) -> Runnable:
             ("human", USER_PROMPT),
         ]
     )
-    return (
-        prompt
-        | model
-        | StrOutputParser()
-        | RunnableLambda(ensure_output_format)
-    )
+    return prompt | structured_model
+
+
+def analyze_repair_problem(problem: str) -> RepairAnalysis:
+    """Analyze a maintenance issue and return validated structured data."""
+
+    chain = create_repair_analysis_chain(load_config())
+    try:
+        result = chain.invoke({"problem": problem})
+    except (OutputParserException, ValidationError) as exc:
+        raise RepairAnalysisError(
+            "模型回覆無法解析為 RepairAnalysis 結構化格式。"
+        ) from exc
+
+    if not isinstance(result, RepairAnalysis):
+        raise RepairAnalysisError(
+            "模型未回傳有效的 RepairAnalysis 結構化結果。"
+        )
+    return result
