@@ -1,5 +1,5 @@
 [project]
-name = "langchain-learning"
+name = "repair-ai-assistant"
 version = "0.2.0"
 description = "A structured-output maintenance issue analysis assistant"
 readme = "README.md"
