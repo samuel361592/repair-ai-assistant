@@ -12,6 +12,10 @@ REQUIRED_ENV_VARS = (
     "OPENAI_MODEL",
 )
 
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_MANUALS_DIR = "data/manuals"
+DEFAULT_VECTORSTORE_DIR = "data/vectorstore/chroma"
+
 
 class ConfigurationError(RuntimeError):
     """Raised when required application configuration is missing."""
@@ -24,6 +28,9 @@ class AppConfig:
     api_key: str
     base_url: str
     model: str
+    embedding_model: str = DEFAULT_EMBEDDING_MODEL
+    manuals_dir: str = DEFAULT_MANUALS_DIR
+    vectorstore_dir: str = DEFAULT_VECTORSTORE_DIR
 
 
 def load_config() -> AppConfig:
@@ -46,4 +53,16 @@ def load_config() -> AppConfig:
         api_key=values["OPENAI_API_KEY"],
         base_url=values["OPENAI_BASE_URL"],
         model=values["OPENAI_MODEL"],
+        embedding_model=(
+            os.getenv("OPENAI_EMBEDDING_MODEL", "").strip()
+            or DEFAULT_EMBEDDING_MODEL
+        ),
+        manuals_dir=(
+            os.getenv("RAG_MANUALS_DIR", "").strip()
+            or DEFAULT_MANUALS_DIR
+        ),
+        vectorstore_dir=(
+            os.getenv("RAG_VECTORSTORE_DIR", "").strip()
+            or DEFAULT_VECTORSTORE_DIR
+        ),
     )

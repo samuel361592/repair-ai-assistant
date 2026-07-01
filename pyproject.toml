@@ -1,17 +1,21 @@
 [project]
 name = "repair-ai-assistant"
-version = "0.2.0"
-description = "A structured-output maintenance issue analysis assistant"
+version = "0.3.0"
+description = "A structured repair analysis and manual RAG assistant"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "langchain-chroma>=1.1.0,<2.0.0",
     "langchain-openai>=1.3.3,<2.0.0",
+    "langchain-text-splitters>=1.1.2,<2.0.0",
     "pydantic>=2.0,<3.0",
     "python-dotenv>=1.2.2",
 ]
 
 [project.scripts]
 repair-assistant = "repair_assistant.main:main"
+repair-rag-ingest = "repair_assistant.rag_cli:ingest_main"
+repair-rag-qa = "repair_assistant.rag_cli:qa_main"
 
 [build-system]
 requires = ["setuptools>=68"]

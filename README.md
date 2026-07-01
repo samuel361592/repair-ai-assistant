@@ -1,16 +1,27 @@
-# LangChain 維修問題分析助手 v0.2
+# LangChain 維修問題分析助手 v0.3
 
-這是一個以 LangChain LCEL 實作的命令列助手。v0.2 使用 LangChain Structured Output，讓模型先回傳經 Pydantic 驗證的 `RepairAnalysis` 物件，再由 CLI 格式化成 Markdown。
+這是一個以 LangChain LCEL 實作的命令列助手。v0.3 保留原有 Structured Output 維修分析，並新增根據本地 Markdown/TXT 維修手冊回答問題的 RAG 功能。
+
+目前提供兩個彼此獨立的流程：
 
 ```text
+維修問題分析：
 使用者輸入
 → ChatPromptTemplate
 → ChatOpenAI.with_structured_output(method="json_mode")
 → RepairAnalysis
 → Markdown CLI 輸出
+
+維修手冊 RAG：
+本地手冊
+→ 文件切片
+→ OpenAIEmbeddings
+→ Chroma
+→ Retriever
+→ 根據檢索內容回答並顯示來源
 ```
 
-目前版本不包含 RAG、Agent、一般 Tool Calling、LangGraph、FastAPI 或 Web UI。
+目前版本不包含 PDF、OCR、Agent、Tool Calling、LangGraph、FastAPI 或 Web UI。
 
 ## Structured Output Schema
 
@@ -40,11 +51,14 @@ uv sync
 OPENAI_API_KEY=your-api-key
 OPENAI_BASE_URL=https://your-api-base-url/v1
 OPENAI_MODEL=your-model-name
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+RAG_MANUALS_DIR=data/manuals
+RAG_VECTORSTORE_DIR=data/vectorstore/chroma
 ```
 
-三個值都不可省略或留空。`.env` 已列入 `.gitignore`，不應提交至版本控制。
+前三個值不可省略或留空。後三個 RAG 設定為可選，未設定時會使用上述預設值。`.env` 已列入 `.gitignore`，不應提交至版本控制。
 
-## 執行
+## 執行維修問題分析
 
 從根目錄入口啟動：
 
@@ -96,6 +110,58 @@ uv run repair-assistant
 3. 最後檢查滾輪與出紙機構
 ```
 
+## 維修手冊 RAG
+
+### 1. 放置手冊
+
+將 UTF-8 編碼的 `.md` 或 `.txt` 手冊放入：
+
+```text
+data/manuals/
+```
+
+目前包含測試用的 `data/manuals/sample_manual.md`。v0.3 不支援 PDF、圖片或 Word 文件。
+
+### 2. 建立或重建向量庫
+
+```powershell
+uv run repair-rag-ingest
+```
+
+這會讀取手冊、以 800 字元和 120 字元重疊切片，使用 `OPENAI_EMBEDDING_MODEL` 建立 embedding，並將 Chroma 資料寫入 `data/vectorstore/chroma`。
+
+`data/vectorstore/` 已加入 `.gitignore`，不會提交至 GitHub。
+
+### 3. 詢問手冊問題
+
+```powershell
+uv run repair-rag-qa
+```
+
+範例問題：
+
+```text
+出紙口卡紙要怎麼處理？
+```
+
+輸出會包含回答及由程式根據 retrieved documents metadata 產生的來源：
+
+```md
+## 回答
+
+根據手冊內容，請先關閉設備電源，打開出紙口蓋板並小心取出殘紙。
+
+## 來源
+
+1. data/manuals/sample_manual.md，chunk 1
+```
+
+若沒有檢索到手冊內容，系統會回答：
+
+```text
+目前手冊資料不足，無法確認。
+```
+
 ## 測試
 
 測試使用 Python 內建的 `unittest`，不會連線或呼叫實際模型 API：
@@ -108,8 +174,12 @@ uv run python -m unittest discover -s tests -v
 
 ```powershell
 uv run python main.py
+uv run repair-rag-ingest
+uv run repair-rag-qa
 ```
+
+RAG 建庫與問答需要 API provider 同時支援設定的 chat model 與 embedding model。
 
 ## 後續版本規劃
 
-RAG、API、Web UI、CRM 串接與多輪對話等能力需另行撰寫 SDD；它們不在 v0.2 的實作範圍內。
+PDF/OCR、API、Web UI、CRM 串接與多輪對話等能力需另行撰寫 SDD；它們不在 v0.3 的實作範圍內。
